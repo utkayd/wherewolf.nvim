@@ -156,19 +156,27 @@ local function setup_autocmds(buf)
           local current_include = state.current.inputs.include or ""
           local current_exclude = state.current.inputs.exclude or ""
 
-          -- Rebuild input area
+          -- Rebuild input area with compact rounded borders (noice.nvim style)
           local lines = {
-            "╔══════════════════════════════════════════════════╗",
+            "╭──────────────────────────────────────────────────╮",
             current_search,
+            "╰──────────────────────────────────────────────────╯",
+            "",
+            "╭──────────────────────────────────────────────────╮",
             current_replace,
+            "╰──────────────────────────────────────────────────╯",
           }
 
           if state.current.show_advanced then
+            table.insert(lines, "")
+            table.insert(lines, "╭──────────────────────────────────────────────────╮")
             table.insert(lines, current_include)
+            table.insert(lines, "╰──────────────────────────────────────────────────╯")
+            table.insert(lines, "")
+            table.insert(lines, "╭──────────────────────────────────────────────────╮")
             table.insert(lines, current_exclude)
+            table.insert(lines, "╰──────────────────────────────────────────────────╯")
           end
-
-          table.insert(lines, "╠══════════════════════════════════════════════════╣")
 
           -- Get existing results
           local results_start = boundaries.get_results_start_row(buf)
@@ -223,14 +231,18 @@ local function setup_autocmds(buf)
     callback = function()
       local cursor = vim.api.nvim_win_get_cursor(0)
       local line_num = cursor[1]
+      -- Bottom border is 2 lines before results_start (results_start - 1 is empty line)
+      local bottom_border_line = state.input_lines.results_start - 2
 
-      -- Check if we're on an input field or header/separator
-      local field_num = state.get_field_from_line(line_num)
-      if field_num or line_num == 1 or line_num == (state.input_lines.results_start - 1) then
-        -- In input area, just clear the line content instead of deleting
+      -- Check if we're in the protected input area (first border to last border)
+      if line_num >= 1 and line_num <= bottom_border_line then
+        -- Check if we're on an actual input field
+        local field_num = state.get_field_from_line(line_num)
         if field_num then
+          -- On input field, just clear the content instead of deleting
           vim.api.nvim_buf_set_lines(buf, line_num - 1, line_num, false, {""})
         end
+        -- On border/empty lines, do nothing (protected)
         return
       end
 
@@ -248,14 +260,15 @@ local function setup_autocmds(buf)
     callback = function()
       local cursor = vim.api.nvim_win_get_cursor(0)
       local line_num = cursor[1]
+      local bottom_border_line = state.input_lines.results_start - 2
       local field_num = state.get_field_from_line(line_num)
 
       if field_num then
-        -- In input field, allow D but prevent deletion if at column 0
+        -- In input field, allow D
         local keys = vim.api.nvim_replace_termcodes('D', true, false, true)
         vim.api.nvim_feedkeys(keys, 'n', false)
-      elseif line_num == 1 or line_num == (state.input_lines.results_start - 1) then
-        -- On header/separator, don't allow D
+      elseif line_num >= 1 and line_num <= bottom_border_line then
+        -- On border/padding lines, don't allow D
         return
       else
         -- In results area, allow normal D
@@ -273,14 +286,15 @@ local function setup_autocmds(buf)
     callback = function()
       local cursor = vim.api.nvim_win_get_cursor(0)
       local line_num = cursor[1]
+      local bottom_border_line = state.input_lines.results_start - 2
       local field_num = state.get_field_from_line(line_num)
 
       if field_num then
         -- In input field, clear and enter insert mode
         vim.api.nvim_buf_set_lines(buf, line_num - 1, line_num, false, {""})
         vim.cmd('startinsert')
-      elseif line_num == 1 or line_num == (state.input_lines.results_start - 1) then
-        -- On header/separator, don't allow cc
+      elseif line_num >= 1 and line_num <= bottom_border_line then
+        -- On border/padding lines, don't allow cc
         return
       else
         -- In results area, allow normal cc
@@ -301,15 +315,14 @@ local function setup_autocmds(buf)
       local start_line = start_pos[2]
       local end_line = end_pos[2]
 
-      -- Check if selection includes any protected lines
-      local last_input_line = state.input_lines.exclude or state.input_lines.replace
-      local separator_line = state.input_lines.results_start - 1
+      -- Check if selection includes any protected lines (header to bottom border, inclusive)
+      local bottom_border_line = state.input_lines.results_start - 2  -- Line before empty line
 
       for line = start_line, end_line do
-        if line == 1 or line == separator_line or (line >= state.input_lines.search and line <= last_input_line) then
-          -- Selection includes protected area, don't allow deletion
+        if line >= 1 and line <= bottom_border_line then
+          -- Selection includes protected area (all input UI), don't allow deletion
           vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<Esc>', true, false, true), 'n', false)
-          vim.notify('Cannot delete input fields or headers', vim.log.levels.WARN)
+          vim.notify('Cannot delete input fields or structure', vim.log.levels.WARN)
           return
         end
       end
@@ -331,12 +344,11 @@ local function setup_autocmds(buf)
       local start_line = start_pos[2]
       local end_line = end_pos[2]
 
-      -- Check if selection includes any protected lines
-      local last_input_line = state.input_lines.exclude or state.input_lines.replace
-      local separator_line = state.input_lines.results_start - 1
+      -- Check if selection includes any protected lines (header to bottom border, inclusive)
+      local bottom_border_line = state.input_lines.results_start - 2  -- Line before empty line
 
       for line = start_line, end_line do
-        if line == 1 or line == separator_line or (line >= state.input_lines.search and line <= last_input_line) then
+        if line >= 1 and line <= bottom_border_line then
           -- Selection includes protected area, don't allow change
           vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<Esc>', true, false, true), 'n', false)
           vim.notify('Cannot modify input field structure', vim.log.levels.WARN)
@@ -399,8 +411,8 @@ local function setup_autocmds(buf)
           -- Don't interfere with results navigation
           return
         end
-        -- Move to search field
-        vim.api.nvim_win_set_cursor(0, { state.input_lines.search, 11 })
+        -- Move to search field (start of actual value)
+        vim.api.nvim_win_set_cursor(0, { state.input_lines.search, 0 })
       end
     end,
     desc = 'Wherewolf: Keep cursor in valid area',
@@ -471,7 +483,12 @@ function M.setup(buf)
 
   -- Initialize cursor position to search field
   vim.schedule(function()
-    if vim.api.nvim_buf_is_valid(buf) then
+    if vim.api.nvim_buf_is_valid(buf) and state.current.win then
+      -- Focus the wherewolf window first
+      if vim.api.nvim_win_is_valid(state.current.win) then
+        vim.api.nvim_set_current_win(state.current.win)
+      end
+
       local line_num = state.input_lines.search
       -- Cursor at start of line (label is virtual text, not real content)
       vim.api.nvim_win_set_cursor(0, { line_num, 0 })

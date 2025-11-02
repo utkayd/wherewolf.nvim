@@ -18,53 +18,81 @@ function M.setup_boundaries(buf)
   local show_advanced = state.current.show_advanced
   local highlights_mod = require("wherewolf.ui.highlights")
 
-  -- Search input boundary (line 1, after header)
-  -- Use virt_text to display the label (not part of actual buffer content)
+  -- Search input boundary (line 1, 0-indexed)
+  -- Use virt_text to display the label inline (noice.nvim style)
   extmarks.search = vim.api.nvim_buf_set_extmark(buf, M.ns_main, 1, 0, {
     id = extmarks.search,  -- Reuse ID if it exists
     right_gravity = false,
-    virt_text = {{ "  Pattern: ", "WherewolfInputLabel" }},
+    virt_text = {{ "│ ", "WherewolfBorder" }, { "Pattern: ", "WherewolfInputLabel" }},
     virt_text_pos = "inline",
     invalidate = false,  -- Don't invalidate on buffer changes
   })
 
-  -- Replace input boundary
-  extmarks.replace = vim.api.nvim_buf_set_extmark(buf, M.ns_main, 2, 0, {
+  -- Right border for search input (at fixed column to match border width)
+  vim.api.nvim_buf_set_extmark(buf, M.ns_main, 1, 0, {
+    virt_text = {{ "│", "WherewolfBorder" }},
+    virt_text_win_col = 51,  -- Position at column 51 (border is 52 chars wide, 0-indexed)
+    invalidate = false,
+  })
+
+  -- Replace input boundary (line 5, 0-indexed)
+  extmarks.replace = vim.api.nvim_buf_set_extmark(buf, M.ns_main, 5, 0, {
     id = extmarks.replace,
     right_gravity = false,
-    virt_text = {{ "  Replace: ", "WherewolfInputLabel" }},
+    virt_text = {{ "│ ", "WherewolfBorder" }, { "Replace: ", "WherewolfInputLabel" }},
     virt_text_pos = "inline",
     invalidate = false,
   })
 
+  -- Right border for replace input (at fixed column)
+  vim.api.nvim_buf_set_extmark(buf, M.ns_main, 5, 0, {
+    virt_text = {{ "│", "WherewolfBorder" }},
+    virt_text_win_col = 51,
+    invalidate = false,
+  })
+
   if show_advanced then
-    -- Include input boundary
-    extmarks.include = vim.api.nvim_buf_set_extmark(buf, M.ns_main, 3, 0, {
+    -- Include input boundary (line 9, 0-indexed)
+    extmarks.include = vim.api.nvim_buf_set_extmark(buf, M.ns_main, 9, 0, {
       id = extmarks.include,
       right_gravity = false,
-      virt_text = {{ "  Files:   ", "WherewolfInputLabel" }},
+      virt_text = {{ "│ ", "WherewolfBorder" }, { "Files:   ", "WherewolfInputLabel" }},
       virt_text_pos = "inline",
       invalidate = false,
     })
 
-    -- Exclude input boundary
-    extmarks.exclude = vim.api.nvim_buf_set_extmark(buf, M.ns_main, 4, 0, {
+    -- Right border for include input (at fixed column)
+    vim.api.nvim_buf_set_extmark(buf, M.ns_main, 9, 0, {
+      virt_text = {{ "│", "WherewolfBorder" }},
+      virt_text_win_col = 51,
+      invalidate = false,
+    })
+
+    -- Exclude input boundary (line 13, 0-indexed)
+    extmarks.exclude = vim.api.nvim_buf_set_extmark(buf, M.ns_main, 13, 0, {
       id = extmarks.exclude,
       right_gravity = false,
-      virt_text = {{ "  Exclude: ", "WherewolfInputLabel" }},
+      virt_text = {{ "│ ", "WherewolfBorder" }, { "Exclude: ", "WherewolfInputLabel" }},
       virt_text_pos = "inline",
       invalidate = false,
     })
 
-    -- Results header (after exclude)
-    extmarks.results_header = vim.api.nvim_buf_set_extmark(buf, M.ns_main, 5, 0, {
+    -- Right border for exclude input (at fixed column)
+    vim.api.nvim_buf_set_extmark(buf, M.ns_main, 13, 0, {
+      virt_text = {{ "│", "WherewolfBorder" }},
+      virt_text_win_col = 51,
+      invalidate = false,
+    })
+
+    -- Results header (line 17, 0-indexed - where results actually start)
+    extmarks.results_header = vim.api.nvim_buf_set_extmark(buf, M.ns_main, 17, 0, {
       id = extmarks.results_header,
       right_gravity = false,
       invalidate = false,
     })
   else
-    -- Results header (after replace, no advanced fields)
-    extmarks.results_header = vim.api.nvim_buf_set_extmark(buf, M.ns_main, 3, 0, {
+    -- Results header (line 9, 0-indexed - where results actually start)
+    extmarks.results_header = vim.api.nvim_buf_set_extmark(buf, M.ns_main, 9, 0, {
       id = extmarks.results_header,
       right_gravity = false,
       invalidate = false,
@@ -80,7 +108,7 @@ end
 function M.get_results_start_row(buf)
   local extmark_id = state.current.extmark_ids.results_header
   if not extmark_id then
-    return 6  -- Fallback
+    return 9  -- Fallback (0-indexed, line 10 - where results actually display)
   end
 
   local pos = vim.api.nvim_buf_get_extmark_by_id(buf, M.ns_main, extmark_id, {})

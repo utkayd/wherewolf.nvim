@@ -28,30 +28,40 @@ local function init_buffer_content(buf)
   local inputs = state.get_inputs()
 
   -- Buffer lines now contain ONLY the input values (labels are virtual text)
+  -- Each input field is wrapped in a compact rounded border (noice.nvim style)
   local lines = {
-    "╔══════════════════════════════════════════════════╗",
+    "╭──────────────────────────────────────────────────╮",
     inputs.search,    -- Line 1: search value only
-    inputs.replace,   -- Line 2: replace value only
+    "╰──────────────────────────────────────────────────╯",
+    "",
+    "╭──────────────────────────────────────────────────╮",
+    inputs.replace,   -- Line 5: replace value only
+    "╰──────────────────────────────────────────────────╯",
   }
 
   -- Update input line numbers (for backwards compatibility)
   state.input_lines.search = 2
-  state.input_lines.replace = 3
+  state.input_lines.replace = 6
 
   if show_advanced then
-    table.insert(lines, inputs.include)   -- Line 3: include value only
-    table.insert(lines, inputs.exclude)   -- Line 4: exclude value only
-    state.input_lines.include = 4
-    state.input_lines.exclude = 5
-    state.input_lines.results_start = 7
+    table.insert(lines, "")
+    table.insert(lines, "╭──────────────────────────────────────────────────╮")
+    table.insert(lines, inputs.include)   -- include value only
+    table.insert(lines, "╰──────────────────────────────────────────────────╯")
+    table.insert(lines, "")
+    table.insert(lines, "╭──────────────────────────────────────────────────╮")
+    table.insert(lines, inputs.exclude)   -- exclude value only
+    table.insert(lines, "╰──────────────────────────────────────────────────╯")
+    state.input_lines.include = 10
+    state.input_lines.exclude = 14
+    state.input_lines.results_start = 18  -- Line 18 (1-indexed) = index 17 (0-indexed)
   else
     -- Hide advanced fields by setting them to nil
     state.input_lines.include = nil
     state.input_lines.exclude = nil
-    state.input_lines.results_start = 5
+    state.input_lines.results_start = 10  -- Line 10 (1-indexed) = index 9 (0-indexed)
   end
-
-  table.insert(lines, "╠══════════════════════════════════════════════════╣")
+  table.insert(lines, "")
   table.insert(lines, "")
   table.insert(lines, "  No results yet. Start typing to search...")
   table.insert(lines, "")
@@ -127,7 +137,7 @@ function M.create()
     win_options = {
       number = false,
       relativenumber = false,
-      cursorline = true,
+      cursorline = false,
       wrap = false,
       spell = false,
       signcolumn = "no",
@@ -176,6 +186,18 @@ function M.open()
 
   -- Setup inputs
   require("wherewolf.ui.inputs").setup(state.current.buf)
+
+  -- Force focus to Pattern field (double schedule to ensure it runs last)
+  vim.schedule(function()
+    vim.schedule(function()
+      if state.current.win and vim.api.nvim_win_is_valid(state.current.win) then
+        vim.api.nvim_set_current_win(state.current.win)
+        -- Position cursor on Pattern field (line 2, 1-indexed)
+        vim.api.nvim_win_set_cursor(state.current.win, { 2, 0 })
+        vim.cmd('startinsert!')
+      end
+    end)
+  end)
 end
 
 ---Close the sidebar
