@@ -92,10 +92,13 @@ end
 ---@param opts? table Options
 ---@return number job_id Job ID or -1 on failure
 function M.execute(pattern, opts)
+  print("[wherewolf] search.execute() called with pattern:", pattern)
+
   opts = opts or {}
   local config = require("wherewolf.config").get()
 
   if not pattern or pattern == "" then
+    print("[wherewolf] Empty pattern, aborting")
     if opts.on_error then
       opts.on_error("Empty search pattern")
     end
@@ -105,6 +108,7 @@ function M.execute(pattern, opts)
   -- Check if ripgrep is available
   if vim.fn.executable('rg') == 0 then
     local msg = "ripgrep not found. Please install ripgrep."
+    print("[wherewolf]", msg)
     vim.notify(msg, vim.log.levels.ERROR)
     if opts.on_error then
       opts.on_error(msg)
@@ -192,10 +196,13 @@ function M.execute(pattern, opts)
   local results = {}
   local stderr_output = {}
 
+  print("[wherewolf] Starting ripgrep with command:", vim.inspect(cmd))
+
   local job_id = vim.fn.jobstart(cmd, {
     stdout_buffered = true,
     stderr_buffered = true,
     on_stdout = function(_, data)
+      print("[wherewolf] on_stdout callback, lines:", #data)
       if data then
         for _, line in ipairs(data) do
           if line ~= "" then
@@ -208,6 +215,7 @@ function M.execute(pattern, opts)
       end
     end,
     on_stderr = function(_, data)
+      print("[wherewolf] on_stderr callback")
       if data then
         for _, line in ipairs(data) do
           if line ~= "" then
@@ -217,14 +225,19 @@ function M.execute(pattern, opts)
       end
     end,
     on_exit = function(_, exit_code)
+      print("[wherewolf] on_exit callback, exit_code:", exit_code, "results:", #results)
       if exit_code == 0 or exit_code == 1 then
         -- exit_code 1 means no matches (not an error)
         if opts.on_complete then
+          print("[wherewolf] Calling on_complete with", #results, "results")
           opts.on_complete(results)
+        else
+          print("[wherewolf] WARNING: on_complete callback is nil!")
         end
       else
         -- Actual error
         local error_msg = table.concat(stderr_output, "\n")
+        print("[wherewolf] Error exit code, message:", error_msg)
         if error_msg ~= "" then
           vim.notify('ripgrep error: ' .. error_msg, vim.log.levels.ERROR)
         end
@@ -235,8 +248,11 @@ function M.execute(pattern, opts)
     end,
   })
 
+  print("[wherewolf] Job started with ID:", job_id)
+
   if job_id <= 0 then
     local msg = "Failed to start ripgrep"
+    print("[wherewolf] FAILED TO START JOB")
     vim.notify(msg, vim.log.levels.ERROR)
     if opts.on_error then
       opts.on_error(msg)

@@ -31,6 +31,8 @@ end
 
 ---Perform search with current inputs
 function M.perform_search()
+  print("[wherewolf] perform_search() called")
+
   if not state.is_buf_valid() then
     vim.notify("Wherewolf buffer is not valid", vim.log.levels.ERROR)
     return
@@ -38,6 +40,8 @@ function M.perform_search()
 
   local buf = state.current.buf
   local inputs = state.get_inputs()
+
+  print("[wherewolf] perform_search: pattern =", inputs.search)
 
   -- Validate inputs
   if inputs.search == "" then

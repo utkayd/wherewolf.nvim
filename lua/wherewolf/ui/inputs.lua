@@ -51,6 +51,10 @@ local function sync_input_from_buffer(buf, field_name)
 
   -- Get value from buffer (0-indexed)
   local value = get_line_value(buf, line_num - 1, prefix)
+
+  -- DEBUG
+  print(string.format("[wherewolf] Syncing %s field: '%s'", field_name, value))
+
   state.update_input(field_name, value)
 end
 
@@ -71,12 +75,17 @@ local function trigger_search()
     -- Get inputs
     local inputs = state.get_inputs()
 
+    -- DEBUG
+    print("[wherewolf] Debounced search triggered. Pattern:", inputs.search)
+
     -- Skip if search pattern is empty
     if inputs.search == "" then
+      print("[wherewolf] Pattern is empty, skipping search")
       return
     end
 
     -- Trigger search
+    print("[wherewolf] Calling perform_search()")
     require("wherewolf.ui").perform_search()
   end, config.debounce_ms)
 end
