@@ -226,14 +226,24 @@ function M.execute(pattern, opts)
     end,
     on_exit = function(_, exit_code)
       print("[wherewolf] on_exit callback, exit_code:", exit_code, "results:", #results)
+
+      -- Exit codes:
+      -- 0 = success with matches
+      -- 1 = success without matches
+      -- 143 = SIGTERM (job was cancelled) - this is NORMAL
+      -- 15 = job stopped
       if exit_code == 0 or exit_code == 1 then
-        -- exit_code 1 means no matches (not an error)
+        -- Normal completion
         if opts.on_complete then
           print("[wherewolf] Calling on_complete with", #results, "results")
           opts.on_complete(results)
         else
           print("[wherewolf] WARNING: on_complete callback is nil!")
         end
+      elseif exit_code == 143 or exit_code == 15 or exit_code == 130 then
+        -- Job was cancelled (SIGTERM/SIGINT) - this is NORMAL, not an error
+        print("[wherewolf] Job was cancelled (exit code " .. exit_code .. "), ignoring")
+        -- Don't call on_error or on_complete - just silently ignore cancelled jobs
       else
         -- Actual error
         local error_msg = table.concat(stderr_output, "\n")
