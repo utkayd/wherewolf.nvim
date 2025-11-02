@@ -38,6 +38,13 @@ function M.perform_search()
     return
   end
 
+  -- CRITICAL: Cancel any running search job first!
+  if state.current.search_job_id and state.current.search_job_id > 0 then
+    print("[wherewolf] Stopping previous search job:", state.current.search_job_id)
+    vim.fn.jobstop(state.current.search_job_id)
+    state.current.search_job_id = nil
+  end
+
   local buf = state.current.buf
   local inputs = state.get_inputs()
 
@@ -62,6 +69,7 @@ function M.perform_search()
     rg_flags = {},
     on_complete = function(search_results)
       state.current.is_searching = false
+      state.current.search_job_id = nil  -- Clear job_id on completion
 
       -- Store results in state
       state.set_results(search_results)
@@ -84,6 +92,7 @@ function M.perform_search()
     end,
     on_error = function(error_msg)
       state.current.is_searching = false
+      state.current.search_job_id = nil  -- Clear job_id on error
 
       -- Show error in results
       if vim.api.nvim_buf_is_valid(buf) then
@@ -94,8 +103,10 @@ function M.perform_search()
     end,
   }
 
-  -- Execute search
-  search.execute(inputs.search, search_opts)
+  -- Execute search and store job_id so we can cancel it later
+  local job_id = search.execute(inputs.search, search_opts)
+  state.current.search_job_id = job_id
+  print("[wherewolf] Stored search job_id:", job_id)
 end
 
 ---Count number of unique files in results

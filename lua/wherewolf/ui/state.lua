@@ -18,6 +18,7 @@ local M = {}
 ---@field show_advanced boolean Show include/exclude fields
 ---@field is_searching boolean Whether a search is in progress
 ---@field debounce_timer? table Timer for debouncing
+---@field search_job_id? number Current search job ID
 
 ---@type WherewolfUIState
 M.current = {
@@ -35,6 +36,7 @@ M.current = {
   show_advanced = false,
   is_searching = false,
   debounce_timer = nil,
+  search_job_id = nil,  -- Track current search job to cancel it
 }
 
 ---Input field line numbers in the buffer
@@ -62,6 +64,12 @@ function M.reset()
   if M.current.debounce_timer then
     M.current.debounce_timer:close()
     M.current.debounce_timer = nil
+  end
+
+  -- Stop any running search job
+  if M.current.search_job_id and M.current.search_job_id > 0 then
+    vim.fn.jobstop(M.current.search_job_id)
+    M.current.search_job_id = nil
   end
 end
 
