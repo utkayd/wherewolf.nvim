@@ -60,15 +60,15 @@ local function make_top_border_with_label(label, width)
 
   local label_with_spaces = " " .. label .. " "
   local label_width = vim.fn.strwidth(label_with_spaces)
-  local remaining = width - 2 - label_width  -- Subtract corners and label
+  local remaining = width - 2 - 1 - label_width  -- Subtract corners, one dash, and label
 
   if remaining < 0 then
     -- Fallback if window is too narrow - just make a plain border
     return make_border_line("╭", "─", "╮", width)
   end
 
-  -- Put label immediately after left corner (no dashes on left)
-  return "╭" .. label_with_spaces .. string.rep("─", remaining) .. "╮"
+  -- Put label one dash after left corner
+  return "╭─" .. label_with_spaces .. string.rep("─", remaining) .. "╮"
 end
 
 ---Initialize buffer content with input fields
@@ -141,7 +141,7 @@ local function init_buffer_content(buf)
       vim.cmd([[
         syntax match WherewolfBorderChar /[╭╮╰╯─│]/
         highlight default link WherewolfBorderChar WherewolfBorder
-        syntax match WherewolfBorderLabel /╭\s\zs\w\+\ze\s/
+        syntax match WherewolfBorderLabel /╭─\s\zs\w\+\ze\s/
         highlight default link WherewolfBorderLabel WherewolfInputLabel
       ]])
     end

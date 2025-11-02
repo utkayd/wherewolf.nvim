@@ -19,6 +19,15 @@ function M.setup(buf)
     inputs.prev_field(buf)
   end, vim.tbl_extend('force', opts, { desc = 'Wherewolf: Previous input field' }))
 
+  -- j/k navigation in normal mode jumps between input fields
+  vim.keymap.set('n', 'j', function()
+    inputs.next_field(buf)
+  end, vim.tbl_extend('force', opts, { desc = 'Wherewolf: Next input field' }))
+
+  vim.keymap.set('n', 'k', function()
+    inputs.prev_field(buf)
+  end, vim.tbl_extend('force', opts, { desc = 'Wherewolf: Previous input field' }))
+
   -- Close sidebar
   vim.keymap.set('n', 'q', function()
     sidebar.close()

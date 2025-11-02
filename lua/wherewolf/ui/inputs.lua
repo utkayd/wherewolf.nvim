@@ -172,12 +172,12 @@ local function setup_autocmds(buf)
           local function make_top_border_with_label(label)
             local label_with_spaces = " " .. label .. " "
             local label_width = vim.fn.strwidth(label_with_spaces)
-            local remaining = width - 2 - label_width
+            local remaining = width - 2 - 1 - label_width  -- Subtract corners, one dash, and label
             if remaining < 0 then
               return "╰" .. string.rep("─", width - 2) .. "╯"
             end
-            -- Put label immediately after left corner (no dashes on left)
-            return "╭" .. label_with_spaces .. string.rep("─", remaining) .. "╮"
+            -- Put label one dash after left corner
+            return "╭─" .. label_with_spaces .. string.rep("─", remaining) .. "╮"
           end
 
           local bottom_border = make_bottom_border()
@@ -419,25 +419,81 @@ local function setup_autocmds(buf)
     desc = 'Wherewolf: Track input changes',
   })
 
-  -- Keep cursor in input fields
+  -- Keep cursor in input fields (vertical restrictions and horizontal fix for empty fields)
   vim.api.nvim_create_autocmd({ 'CursorMoved', 'CursorMovedI' }, {
     group = augroup,
     buffer = buf,
     callback = function()
       local cursor = vim.api.nvim_win_get_cursor(0)
       local line_num = cursor[1]
+      local col = cursor[2]
+      local mode = vim.api.nvim_get_mode().mode
 
-      -- Determine last input line (exclude if advanced, else replace)
-      local last_input_line = state.input_lines.exclude or state.input_lines.replace
+      -- Get list of valid input field lines
+      local valid_input_lines = {
+        state.input_lines.search,
+        state.input_lines.replace,
+      }
+      if state.input_lines.include then
+        table.insert(valid_input_lines, state.input_lines.include)
+      end
+      if state.input_lines.exclude then
+        table.insert(valid_input_lines, state.input_lines.exclude)
+      end
 
-      -- If cursor is on a non-input line, move it to search field
-      if line_num < state.input_lines.search or line_num > last_input_line then
-        if line_num > last_input_line then
-          -- Don't interfere with results navigation
-          return
+      -- Determine the last valid input line
+      local last_input_line = valid_input_lines[#valid_input_lines]
+
+      -- Don't interfere if cursor is in results area (below input fields)
+      if line_num > last_input_line then
+        return
+      end
+
+      -- Check if cursor is on a valid input line
+      local is_valid = false
+      for _, valid_line in ipairs(valid_input_lines) do
+        if line_num == valid_line then
+          is_valid = true
+          break
         end
-        -- Move to search field (start of actual value)
-        vim.api.nvim_win_set_cursor(0, { state.input_lines.search, 0 })
+      end
+
+      -- VERTICAL: If not on a valid input line, snap to nearest input line
+      if not is_valid then
+        local nearest_line = state.input_lines.search
+        local min_distance = math.abs(line_num - nearest_line)
+
+        for _, valid_line in ipairs(valid_input_lines) do
+          local distance = math.abs(line_num - valid_line)
+          if distance < min_distance then
+            min_distance = distance
+            nearest_line = valid_line
+          end
+        end
+
+        -- Also insert space if navigating to empty field in normal mode
+        if mode == 'n' then
+          local lines = vim.api.nvim_buf_get_lines(buf, nearest_line - 1, nearest_line, false)
+          if #lines > 0 and lines[1] == "" then
+            state.current.update_disabled = true
+            vim.api.nvim_buf_set_lines(buf, nearest_line - 1, nearest_line, false, { " " })
+            vim.schedule(function()
+              state.current.update_disabled = false
+            end)
+          end
+        end
+
+        vim.api.nvim_win_set_cursor(0, { nearest_line, cursor[2] })
+      -- HORIZONTAL: If we're on a valid input line in normal mode with empty content, add space
+      elseif mode == 'n' and is_valid then
+        local lines = vim.api.nvim_buf_get_lines(buf, line_num - 1, line_num, false)
+        if #lines > 0 and lines[1] == "" and col == 0 then
+          state.current.update_disabled = true
+          vim.api.nvim_buf_set_lines(buf, line_num - 1, line_num, false, { " " })
+          vim.schedule(function()
+            state.current.update_disabled = false
+          end)
+        end
       end
     end,
     desc = 'Wherewolf: Keep cursor in valid area',
@@ -447,57 +503,75 @@ end
 ---Navigate to next input field
 ---@param buf number Buffer handle
 function M.next_field(buf)
-  -- Get current field
-  local current = state.current.current_field
+  -- Get current cursor position to determine which field we're on
+  local cursor = vim.api.nvim_win_get_cursor(0)
+  local current_line = cursor[1]
 
-  -- Determine max field (2 if not showing advanced, 4 if showing)
-  local max_field = state.current.show_advanced and 4 or 2
-
-  -- Calculate next field (wrap around)
-  local next_field = current + 1
-  if next_field > max_field then
-    next_field = 1
+  -- Build list of input field lines in order
+  local input_lines = { state.input_lines.search, state.input_lines.replace }
+  if state.current.show_advanced then
+    table.insert(input_lines, state.input_lines.include)
+    table.insert(input_lines, state.input_lines.exclude)
   end
+
+  -- Find next input line
+  local next_line = input_lines[1] -- Default to first field
+  for i, line in ipairs(input_lines) do
+    if current_line == line then
+      -- Found current field, move to next (wrap around)
+      next_line = input_lines[i + 1] or input_lines[1]
+      break
+    elseif current_line < line then
+      -- Cursor is before this field, jump to it
+      next_line = line
+      break
+    end
+  end
+
+  -- Move cursor to next field
+  local lines = vim.api.nvim_buf_get_lines(buf, next_line - 1, next_line, false)
+  local line_length = #(lines[1] or "")
+  vim.api.nvim_win_set_cursor(0, { next_line, math.min(cursor[2], line_length) })
 
   -- Update state
-  state.current.current_field = next_field
-
-  -- Move cursor to field line
-  local line_num = state.get_line_for_field(next_field)
-  if line_num then
-    -- Position cursor at end of actual value (label is virtual text)
-    local lines = vim.api.nvim_buf_get_lines(buf, line_num - 1, line_num, false)
-    local line_length = #(lines[1] or "")
-    vim.api.nvim_win_set_cursor(0, { line_num, line_length })
-  end
+  state.current.current_field = state.get_field_from_line(next_line) or 1
 end
 
 ---Navigate to previous input field
 ---@param buf number Buffer handle
 function M.prev_field(buf)
-  -- Get current field
-  local current = state.current.current_field
+  -- Get current cursor position to determine which field we're on
+  local cursor = vim.api.nvim_win_get_cursor(0)
+  local current_line = cursor[1]
 
-  -- Determine max field (2 if not showing advanced, 4 if showing)
-  local max_field = state.current.show_advanced and 4 or 2
-
-  -- Calculate previous field (wrap around)
-  local prev_field = current - 1
-  if prev_field < 1 then
-    prev_field = max_field
+  -- Build list of input field lines in order
+  local input_lines = { state.input_lines.search, state.input_lines.replace }
+  if state.current.show_advanced then
+    table.insert(input_lines, state.input_lines.include)
+    table.insert(input_lines, state.input_lines.exclude)
   end
+
+  -- Find previous input line
+  local prev_line = input_lines[#input_lines] -- Default to last field
+  for i, line in ipairs(input_lines) do
+    if current_line == line then
+      -- Found current field, move to previous (wrap around)
+      prev_line = input_lines[i - 1] or input_lines[#input_lines]
+      break
+    elseif current_line < line then
+      -- Cursor is before this field, jump to previous field
+      prev_line = input_lines[i - 1] or input_lines[#input_lines]
+      break
+    end
+  end
+
+  -- Move cursor to previous field
+  local lines = vim.api.nvim_buf_get_lines(buf, prev_line - 1, prev_line, false)
+  local line_length = #(lines[1] or "")
+  vim.api.nvim_win_set_cursor(0, { prev_line, math.min(cursor[2], line_length) })
 
   -- Update state
-  state.current.current_field = prev_field
-
-  -- Move cursor to field line
-  local line_num = state.get_line_for_field(prev_field)
-  if line_num then
-    -- Position cursor at end of actual value (label is virtual text)
-    local lines = vim.api.nvim_buf_get_lines(buf, line_num - 1, line_num, false)
-    local line_length = #(lines[1] or "")
-    vim.api.nvim_win_set_cursor(0, { line_num, line_length })
-  end
+  state.current.current_field = state.get_field_from_line(prev_line) or 1
 end
 
 ---Setup input field system
