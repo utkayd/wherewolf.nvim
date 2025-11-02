@@ -14,73 +14,83 @@ M.ns_hl = vim.api.nvim_create_namespace('wherewolf-highlight')  -- Syntax highli
 ---@param buf number Buffer handle
 ---@return table extmark_ids Table of extmark IDs
 function M.setup_boundaries(buf)
+  -- Clear existing extmarks in our namespace to avoid duplication
+  vim.api.nvim_buf_clear_namespace(buf, M.ns_main, 0, -1)
+
   local extmarks = {}
   local show_advanced = state.current.show_advanced
   local highlights_mod = require("wherewolf.ui.highlights")
 
+  -- Get current window width for dynamic right border positioning
+  local width = state.current.window_width or 52
+  local right_col = width - 1  -- Last column (0-indexed)
+
   -- Search input boundary (line 1, 0-indexed)
-  -- Use virt_text to display the label inline (noice.nvim style)
+  -- Left border only (label is now in top border)
   extmarks.search = vim.api.nvim_buf_set_extmark(buf, M.ns_main, 1, 0, {
     id = extmarks.search,  -- Reuse ID if it exists
     right_gravity = false,
-    virt_text = {{ "│ ", "WherewolfBorder" }, { "Pattern: ", "WherewolfInputLabel" }},
+    virt_text = {{ "│ ", "WherewolfBorder" }},
     virt_text_pos = "inline",
     invalidate = false,  -- Don't invalidate on buffer changes
   })
 
-  -- Right border for search input (at fixed column to match border width)
+  -- Right border for search input (at dynamic column based on window width)
   vim.api.nvim_buf_set_extmark(buf, M.ns_main, 1, 0, {
     virt_text = {{ "│", "WherewolfBorder" }},
-    virt_text_win_col = 51,  -- Position at column 51 (border is 52 chars wide, 0-indexed)
+    virt_text_win_col = right_col,
     invalidate = false,
   })
 
   -- Replace input boundary (line 5, 0-indexed)
+  -- Left border only (label is now in top border)
   extmarks.replace = vim.api.nvim_buf_set_extmark(buf, M.ns_main, 5, 0, {
     id = extmarks.replace,
     right_gravity = false,
-    virt_text = {{ "│ ", "WherewolfBorder" }, { "Replace: ", "WherewolfInputLabel" }},
+    virt_text = {{ "│ ", "WherewolfBorder" }},
     virt_text_pos = "inline",
     invalidate = false,
   })
 
-  -- Right border for replace input (at fixed column)
+  -- Right border for replace input (at dynamic column)
   vim.api.nvim_buf_set_extmark(buf, M.ns_main, 5, 0, {
     virt_text = {{ "│", "WherewolfBorder" }},
-    virt_text_win_col = 51,
+    virt_text_win_col = right_col,
     invalidate = false,
   })
 
   if show_advanced then
     -- Include input boundary (line 9, 0-indexed)
+    -- Left border only (label is now in top border)
     extmarks.include = vim.api.nvim_buf_set_extmark(buf, M.ns_main, 9, 0, {
       id = extmarks.include,
       right_gravity = false,
-      virt_text = {{ "│ ", "WherewolfBorder" }, { "Files:   ", "WherewolfInputLabel" }},
+      virt_text = {{ "│ ", "WherewolfBorder" }},
       virt_text_pos = "inline",
       invalidate = false,
     })
 
-    -- Right border for include input (at fixed column)
+    -- Right border for include input (at dynamic column)
     vim.api.nvim_buf_set_extmark(buf, M.ns_main, 9, 0, {
       virt_text = {{ "│", "WherewolfBorder" }},
-      virt_text_win_col = 51,
+      virt_text_win_col = right_col,
       invalidate = false,
     })
 
     -- Exclude input boundary (line 13, 0-indexed)
+    -- Left border only (label is now in top border)
     extmarks.exclude = vim.api.nvim_buf_set_extmark(buf, M.ns_main, 13, 0, {
       id = extmarks.exclude,
       right_gravity = false,
-      virt_text = {{ "│ ", "WherewolfBorder" }, { "Exclude: ", "WherewolfInputLabel" }},
+      virt_text = {{ "│ ", "WherewolfBorder" }},
       virt_text_pos = "inline",
       invalidate = false,
     })
 
-    -- Right border for exclude input (at fixed column)
+    -- Right border for exclude input (at dynamic column)
     vim.api.nvim_buf_set_extmark(buf, M.ns_main, 13, 0, {
       virt_text = {{ "│", "WherewolfBorder" }},
-      virt_text_win_col = 51,
+      virt_text_win_col = right_col,
       invalidate = false,
     })
 

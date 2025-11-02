@@ -156,26 +156,51 @@ local function setup_autocmds(buf)
           local current_include = state.current.inputs.include or ""
           local current_exclude = state.current.inputs.exclude or ""
 
-          -- Rebuild input area with compact rounded borders (noice.nvim style)
+          -- Rebuild input area with compact rounded borders (cmdline style)
+          -- Get current window width for dynamic borders
+          local width = state.current.window_width or 52
+
+          -- Ensure width is reasonable
+          if width < 10 then
+            width = 10
+          end
+
+          local function make_bottom_border()
+            return "╰" .. string.rep("─", width - 2) .. "╯"
+          end
+
+          local function make_top_border_with_label(label)
+            local label_with_spaces = " " .. label .. " "
+            local label_width = vim.fn.strwidth(label_with_spaces)
+            local remaining = width - 2 - label_width
+            if remaining < 0 then
+              return "╰" .. string.rep("─", width - 2) .. "╯"
+            end
+            -- Put label immediately after left corner (no dashes on left)
+            return "╭" .. label_with_spaces .. string.rep("─", remaining) .. "╮"
+          end
+
+          local bottom_border = make_bottom_border()
+
           local lines = {
-            "╭──────────────────────────────────────────────────╮",
+            make_top_border_with_label("Pattern"),
             current_search,
-            "╰──────────────────────────────────────────────────╯",
+            bottom_border,
             "",
-            "╭──────────────────────────────────────────────────╮",
+            make_top_border_with_label("Replace"),
             current_replace,
-            "╰──────────────────────────────────────────────────╯",
+            bottom_border,
           }
 
           if state.current.show_advanced then
             table.insert(lines, "")
-            table.insert(lines, "╭──────────────────────────────────────────────────╮")
+            table.insert(lines, make_top_border_with_label("Files"))
             table.insert(lines, current_include)
-            table.insert(lines, "╰──────────────────────────────────────────────────╯")
+            table.insert(lines, bottom_border)
             table.insert(lines, "")
-            table.insert(lines, "╭──────────────────────────────────────────────────╮")
+            table.insert(lines, make_top_border_with_label("Exclude"))
             table.insert(lines, current_exclude)
-            table.insert(lines, "╰──────────────────────────────────────────────────╯")
+            table.insert(lines, bottom_border)
           end
 
           -- Get existing results
