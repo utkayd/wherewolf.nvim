@@ -265,7 +265,8 @@ local function setup_autocmds(buf)
         local field_num = state.get_field_from_line(line_num)
         if field_num then
           -- On input field, just clear the content instead of deleting
-          vim.api.nvim_buf_set_lines(buf, line_num - 1, line_num, false, {""})
+          local boundaries = require("wherewolf.ui.boundaries")
+          boundaries.set_buf_lines_safe(buf, line_num - 1, line_num, {""})
         end
         -- On border/empty lines, do nothing (protected)
         return
@@ -316,7 +317,8 @@ local function setup_autocmds(buf)
 
       if field_num then
         -- In input field, clear and enter insert mode
-        vim.api.nvim_buf_set_lines(buf, line_num - 1, line_num, false, {""})
+        local boundaries = require("wherewolf.ui.boundaries")
+        boundaries.set_buf_lines_safe(buf, line_num - 1, line_num, {""})
         vim.cmd('startinsert')
       elseif line_num >= 1 and line_num <= bottom_border_line then
         -- On border/padding lines, don't allow cc
@@ -442,11 +444,8 @@ local function setup_autocmds(buf)
       -- If on empty field at column 0, insert space
       local lines = vim.api.nvim_buf_get_lines(buf, line_num - 1, line_num, false)
       if #lines > 0 and lines[1] == "" and col == 0 then
-        state.current.update_disabled = true
-        vim.api.nvim_buf_set_lines(buf, line_num - 1, line_num, false, { " " })
-        vim.schedule(function()
-          state.current.update_disabled = false
-        end)
+        local boundaries = require("wherewolf.ui.boundaries")
+        boundaries.set_buf_lines_safe(buf, line_num - 1, line_num, { " " })
       end
     end,
     desc = 'Wherewolf: Handle mode change on empty fields',
@@ -508,11 +507,8 @@ local function setup_autocmds(buf)
         if mode == 'n' then
           local lines = vim.api.nvim_buf_get_lines(buf, nearest_line - 1, nearest_line, false)
           if #lines > 0 and lines[1] == "" then
-            state.current.update_disabled = true
-            vim.api.nvim_buf_set_lines(buf, nearest_line - 1, nearest_line, false, { " " })
-            vim.schedule(function()
-              state.current.update_disabled = false
-            end)
+            local boundaries = require("wherewolf.ui.boundaries")
+            boundaries.set_buf_lines_safe(buf, nearest_line - 1, nearest_line, { " " })
           end
         end
 
@@ -521,11 +517,8 @@ local function setup_autocmds(buf)
       elseif mode == 'n' and is_valid then
         local lines = vim.api.nvim_buf_get_lines(buf, line_num - 1, line_num, false)
         if #lines > 0 and lines[1] == "" and col == 0 then
-          state.current.update_disabled = true
-          vim.api.nvim_buf_set_lines(buf, line_num - 1, line_num, false, { " " })
-          vim.schedule(function()
-            state.current.update_disabled = false
-          end)
+          local boundaries = require("wherewolf.ui.boundaries")
+          boundaries.set_buf_lines_safe(buf, line_num - 1, line_num, { " " })
         end
       end
     end,

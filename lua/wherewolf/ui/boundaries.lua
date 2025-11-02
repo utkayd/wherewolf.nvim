@@ -195,8 +195,12 @@ function M.set_buf_lines_safe(buf, start_row, end_row, lines)
   vim.api.nvim_buf_set_lines(buf, start_row, end_row, false, lines)
   vim.api.nvim_set_option_value('modifiable', was_modifiable, { buf = buf })
 
-  -- Clear guard flag AFTER event loop completes
+  -- Re-setup extmark boundaries to fix any broken borders
   vim.schedule(function()
+    if vim.api.nvim_buf_is_valid(buf) then
+      -- Only re-setup the extmarks, don't change buffer content
+      state.current.extmark_ids = M.setup_boundaries(buf)
+    end
     state.current.update_disabled = false
   end)
 end
