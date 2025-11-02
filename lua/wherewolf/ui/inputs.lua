@@ -419,6 +419,39 @@ local function setup_autocmds(buf)
     desc = 'Wherewolf: Track input changes',
   })
 
+  -- Handle mode changes (insert to normal) to fix empty field cursor position
+  vim.api.nvim_create_autocmd('ModeChanged', {
+    group = augroup,
+    buffer = buf,
+    callback = function(ev)
+      -- Only handle insert -> normal transitions
+      if not (ev.match:match('^i') and ev.match:match('n$')) then
+        return
+      end
+
+      local cursor = vim.api.nvim_win_get_cursor(0)
+      local line_num = cursor[1]
+      local col = cursor[2]
+
+      -- Check if on an input field
+      local field_num = state.get_field_from_line(line_num)
+      if not field_num then
+        return
+      end
+
+      -- If on empty field at column 0, insert space
+      local lines = vim.api.nvim_buf_get_lines(buf, line_num - 1, line_num, false)
+      if #lines > 0 and lines[1] == "" and col == 0 then
+        state.current.update_disabled = true
+        vim.api.nvim_buf_set_lines(buf, line_num - 1, line_num, false, { " " })
+        vim.schedule(function()
+          state.current.update_disabled = false
+        end)
+      end
+    end,
+    desc = 'Wherewolf: Handle mode change on empty fields',
+  })
+
   -- Keep cursor in input fields (vertical restrictions and horizontal fix for empty fields)
   vim.api.nvim_create_autocmd({ 'CursorMoved', 'CursorMovedI' }, {
     group = augroup,
