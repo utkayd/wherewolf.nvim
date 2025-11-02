@@ -2,6 +2,9 @@
 
 local M = {}
 
+-- Store current search object for cancellation
+M._current_search_obj = nil
+
 ---Blacklisted ripgrep flags that break parsing or cause issues
 local BLACKLISTED_FLAGS = {
   '--binary',
@@ -92,13 +95,10 @@ end
 ---@param opts? table Options
 ---@return number job_id Job ID or -1 on failure
 function M.execute(pattern, opts)
-  print("[wherewolf] search.execute() called with pattern:", pattern)
-
   opts = opts or {}
   local config = require("wherewolf.config").get()
 
   if not pattern or pattern == "" then
-    print("[wherewolf] Empty pattern, aborting")
     if opts.on_error then
       opts.on_error("Empty search pattern")
     end
@@ -108,7 +108,6 @@ function M.execute(pattern, opts)
   -- Check if ripgrep is available
   if vim.fn.executable('rg') == 0 then
     local msg = "ripgrep not found. Please install ripgrep."
-    print("[wherewolf]", msg)
     vim.notify(msg, vim.log.levels.ERROR)
     if opts.on_error then
       opts.on_error(msg)
@@ -192,62 +191,51 @@ function M.execute(pattern, opts)
     table.insert(cmd, opts.path)
   end
 
-  -- Execute asynchronously
-  local results = {}
-  local stderr_output = {}
+  -- Execute asynchronously using vim.system (newer, more reliable API)
+  local cwd = vim.fn.getcwd()
 
-  print("[wherewolf] Starting ripgrep with command:", vim.inspect(cmd))
+  -- Use vim.system instead of jobstart
+  local callback_fired = false
+  local obj = vim.system(cmd, {
+    cwd = cwd,
+    text = true,
+  }, function(result)
 
-  local job_id = vim.fn.jobstart(cmd, {
-    stdout_buffered = true,
-    stderr_buffered = true,
-    on_stdout = function(_, data)
-      print("[wherewolf] on_stdout callback, lines:", #data)
-      if data then
-        for _, line in ipairs(data) do
+    -- Prevent multiple callback executions
+    if callback_fired then
+      return
+    end
+    callback_fired = true
+
+
+    vim.schedule(function()
+      -- Parse results from stdout
+      local results = {}
+      if result.stdout then
+        for line in result.stdout:gmatch("[^\n]+") do
           if line ~= "" then
             local parsed = M.parse_vimgrep_line(line)
             if parsed then
               table.insert(results, parsed)
+            else
             end
           end
         end
       end
-    end,
-    on_stderr = function(_, data)
-      print("[wherewolf] on_stderr callback")
-      if data then
-        for _, line in ipairs(data) do
-          if line ~= "" then
-            table.insert(stderr_output, line)
-          end
-        end
-      end
-    end,
-    on_exit = function(_, exit_code)
-      print("[wherewolf] on_exit callback, exit_code:", exit_code, "results:", #results)
 
-      -- Exit codes:
-      -- 0 = success with matches
-      -- 1 = success without matches
-      -- 143 = SIGTERM (job was cancelled) - this is NORMAL
-      -- 15 = job stopped
-      if exit_code == 0 or exit_code == 1 then
-        -- Normal completion
+
+      -- Handle completion
+      if result.code == 0 or result.code == 1 then
+        -- Normal completion (0 = found results, 1 = no results)
         if opts.on_complete then
-          print("[wherewolf] Calling on_complete with", #results, "results")
           opts.on_complete(results)
         else
-          print("[wherewolf] WARNING: on_complete callback is nil!")
         end
-      elseif exit_code == 143 or exit_code == 15 or exit_code == 130 then
-        -- Job was cancelled (SIGTERM/SIGINT) - this is NORMAL, not an error
-        print("[wherewolf] Job was cancelled (exit code " .. exit_code .. "), ignoring")
-        -- Don't call on_error or on_complete - just silently ignore cancelled jobs
+      elseif result.code == 143 or result.code == 15 or result.code == 130 then
+        -- Job was cancelled
       else
-        -- Actual error
-        local error_msg = table.concat(stderr_output, "\n")
-        print("[wherewolf] Error exit code, message:", error_msg)
+        -- Error
+        local error_msg = result.stderr or ""
         if error_msg ~= "" then
           vim.notify('ripgrep error: ' .. error_msg, vim.log.levels.ERROR)
         end
@@ -255,21 +243,17 @@ function M.execute(pattern, opts)
           opts.on_error(error_msg)
         end
       end
-    end,
-  })
+    end)
+  end)
 
-  print("[wherewolf] Job started with ID:", job_id)
 
-  if job_id <= 0 then
-    local msg = "Failed to start ripgrep"
-    print("[wherewolf] FAILED TO START JOB")
-    vim.notify(msg, vim.log.levels.ERROR)
-    if opts.on_error then
-      opts.on_error(msg)
-    end
-  end
+  -- Return a pseudo job_id (use the object's PID if available)
+  local pseudo_job_id = obj.pid or -1
 
-  return job_id
+  -- Store the object for cancellation
+  M._current_search_obj = obj
+
+  return pseudo_job_id
 end
 
 ---Perform replacement in files

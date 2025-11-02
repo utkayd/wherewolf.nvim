@@ -52,42 +52,66 @@ local function sync_input_from_buffer(buf, field_name)
   -- Get value from buffer (0-indexed)
   local value = get_line_value(buf, line_num - 1, prefix)
 
-  -- DEBUG
-  print(string.format("[wherewolf] Syncing %s field: '%s'", field_name, value))
-
   state.update_input(field_name, value)
 end
 
 ---Trigger search with current inputs (debounced)
 local function trigger_search()
   local config = require("wherewolf.config").get()
+  local boundaries = require("wherewolf.ui.boundaries")
+
+  -- Don't trigger if already searching (prevent infinite loop)
+  if state.current.is_searching then
+    return
+  end
 
   -- Cancel existing timer
   if state.current.debounce_timer then
+    state.current.debounce_timer:stop()
     state.current.debounce_timer:close()
     state.current.debounce_timer = nil
   end
 
-  -- Create new timer
-  state.current.debounce_timer = vim.defer_fn(function()
+  -- Create new timer (using vim.loop for proper cancellable timer)
+  local timer = vim.loop.new_timer()
+  state.current.debounce_timer = timer
+
+  timer:start(config.debounce_ms, 0, vim.schedule_wrap(function()
+    -- Clear the timer reference
     state.current.debounce_timer = nil
+    timer:stop()
+    timer:close()
 
-    -- Get inputs
-    local inputs = state.get_inputs()
+    -- Double-check we're not already searching
+    if state.current.is_searching then
+      return
+    end
 
-    -- DEBUG
-    print("[wherewolf] Debounced search triggered. Pattern:", inputs.search)
+    -- Get current input values from buffer
+    local buf = state.current.buf
+    if not buf or not vim.api.nvim_buf_is_valid(buf) then
+      return
+    end
+
+    local current_inputs = boundaries.get_all_inputs(buf)
+
+    -- VALUE CHANGE DETECTION: Only trigger if inputs actually changed
+    if state.current.last_inputs and vim.deep_equal(current_inputs, state.current.last_inputs) then
+      return
+    end
+
+    -- Update state with new values
+    state.current.inputs = current_inputs
+    state.current.last_inputs = vim.deepcopy(current_inputs)
 
     -- Skip if search pattern is empty
-    if inputs.search == "" then
-      print("[wherewolf] Pattern is empty, skipping search")
+    if current_inputs.search == "" then
       return
     end
 
     -- Trigger search
-    print("[wherewolf] Calling perform_search()")
     require("wherewolf.ui").perform_search()
-  end, config.debounce_ms)
+  end))
 end
 
 ---Setup autocmds for live input updates
@@ -100,6 +124,11 @@ local function setup_autocmds(buf)
     group = augroup,
     buffer = buf,
     callback = function()
+      -- GUARD #1: Skip if this is a programmatic update
+      if state.current.update_disabled then
+        return
+      end
+
       -- Get current line (1-indexed)
       local cursor = vim.api.nvim_win_get_cursor(0)
       local line_num = cursor[1]
@@ -110,10 +139,11 @@ local function setup_autocmds(buf)
         return
       end
 
-      -- Sync input value to state
+      -- Sync input value to state (for backwards compatibility)
       local field_name = state.get_field_name(field_num)
       if field_name then
         sync_input_from_buffer(buf, field_name)
+        -- Trigger search (with built-in value change detection)
         trigger_search()
       end
     end,
@@ -128,9 +158,12 @@ local function setup_autocmds(buf)
       local cursor = vim.api.nvim_win_get_cursor(0)
       local line_num = cursor[1]
 
+      -- Determine last input line (exclude if advanced, else replace)
+      local last_input_line = state.input_lines.exclude or state.input_lines.replace
+
       -- If cursor is on a non-input line, move it to search field
-      if line_num < state.input_lines.search or line_num > state.input_lines.exclude then
-        if line_num > state.input_lines.exclude then
+      if line_num < state.input_lines.search or line_num > last_input_line then
+        if line_num > last_input_line then
           -- Don't interfere with results navigation
           return
         end
@@ -148,9 +181,12 @@ function M.next_field(buf)
   -- Get current field
   local current = state.current.current_field
 
+  -- Determine max field (2 if not showing advanced, 4 if showing)
+  local max_field = state.current.show_advanced and 4 or 2
+
   -- Calculate next field (wrap around)
   local next_field = current + 1
-  if next_field > 4 then
+  if next_field > max_field then
     next_field = 1
   end
 
@@ -173,10 +209,13 @@ function M.prev_field(buf)
   -- Get current field
   local current = state.current.current_field
 
+  -- Determine max field (2 if not showing advanced, 4 if showing)
+  local max_field = state.current.show_advanced and 4 or 2
+
   -- Calculate previous field (wrap around)
   local prev_field = current - 1
   if prev_field < 1 then
-    prev_field = 4
+    prev_field = max_field
   end
 
   -- Update state
@@ -211,6 +250,8 @@ end
 ---Clear all input fields
 ---@param buf number Buffer handle
 function M.clear_all(buf)
+  local boundaries = require("wherewolf.ui.boundaries")
+
   -- Clear state
   state.current.inputs = {
     search = "",
@@ -218,16 +259,27 @@ function M.clear_all(buf)
     include = "",
     exclude = "",
   }
+  state.current.last_inputs = vim.deepcopy(state.current.inputs)
 
-  -- Update buffer
+  -- Update buffer using safe wrapper
+  state.current.update_disabled = true
+
   local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
   lines[state.input_lines.search] = "  Pattern: "
   lines[state.input_lines.replace] = "  Replace: "
-  lines[state.input_lines.include] = "  Files:   "
-  lines[state.input_lines.exclude] = "  Exclude: "
+  if state.input_lines.include then
+    lines[state.input_lines.include] = "  Files:   "
+  end
+  if state.input_lines.exclude then
+    lines[state.input_lines.exclude] = "  Exclude: "
+  end
 
   vim.api.nvim_buf_set_option(buf, 'modifiable', true)
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+
+  vim.schedule(function()
+    state.current.update_disabled = false
+  end)
 
   -- Move cursor to search field
   vim.api.nvim_win_set_cursor(0, { state.input_lines.search, 11 })

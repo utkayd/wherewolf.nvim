@@ -23,20 +23,70 @@ end
 ---Initialize buffer content with input fields
 ---@param buf number Buffer handle
 local function init_buffer_content(buf)
+  local boundaries = require("wherewolf.ui.boundaries")
+  local show_advanced = state.current.show_advanced
+  local inputs = state.get_inputs()
+
   local lines = {
     "╔══════════════════════════════════════════════════╗",
-    "  Pattern: ",
-    "  Replace: ",
-    "  Files:   ",
-    "  Exclude: ",
-    "╠══════════════════════════════════════════════════╣",
-    "",
-    "  No results yet. Start typing to search...",
-    "",
+    "  Pattern: " .. inputs.search,
+    "  Replace: " .. inputs.replace,
   }
 
-  vim.api.nvim_buf_set_option(buf, 'modifiable', true)
-  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  -- Update input line numbers (for backwards compatibility)
+  state.input_lines.search = 2
+  state.input_lines.replace = 3
+
+  if show_advanced then
+    table.insert(lines, "  Files:   " .. inputs.include)
+    table.insert(lines, "  Exclude: " .. inputs.exclude)
+    state.input_lines.include = 4
+    state.input_lines.exclude = 5
+    state.input_lines.results_start = 7
+  else
+    -- Hide advanced fields by setting them to nil
+    state.input_lines.include = nil
+    state.input_lines.exclude = nil
+    state.input_lines.results_start = 5
+  end
+
+  table.insert(lines, "╠══════════════════════════════════════════════════╣")
+  table.insert(lines, "")
+  table.insert(lines, "  No results yet. Start typing to search...")
+  table.insert(lines, "")
+
+  -- Set buffer content using safe wrapper
+  boundaries.set_buf_lines_safe(buf, 0, -1, lines)
+
+  -- Setup extmark boundaries AFTER buffer has content
+  vim.schedule(function()
+    if vim.api.nvim_buf_is_valid(buf) then
+      state.current.extmark_ids = boundaries.setup_boundaries(buf)
+    end
+  end)
+end
+
+---Refresh buffer content (used when toggling advanced fields)
+---@param buf number Buffer handle
+function M.refresh_content(buf)
+  if not vim.api.nvim_buf_is_valid(buf) then
+    return
+  end
+
+  -- Save current results
+  local results = state.get_results()
+
+  -- Rebuild buffer content (this will also re-setup extmark boundaries)
+  init_buffer_content(buf)
+
+  -- Redisplay results if any (scheduled to ensure extmarks are ready)
+  if #results > 0 then
+    vim.schedule(function()
+      if vim.api.nvim_buf_is_valid(buf) then
+        require("wherewolf.ui.results").display(buf, results)
+      end
+    end)
+  end
 end
 
 ---Create and mount the sidebar split
@@ -108,6 +158,12 @@ function M.open()
       vim.api.nvim_set_current_win(state.current.split.winid)
     end
     return
+  end
+
+  -- Initialize show_advanced from config if not set
+  if state.current.show_advanced == nil then
+    local config = require("wherewolf.config").get()
+    state.current.show_advanced = config.ui.show_include_exclude
   end
 
   -- Create new sidebar

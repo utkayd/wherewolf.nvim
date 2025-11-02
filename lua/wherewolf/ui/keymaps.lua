@@ -114,6 +114,7 @@ end
 ---Apply all replacements
 function M.apply_all_replacements()
   local state = require("wherewolf.ui.state")
+  local search = require("wherewolf.search")
   local inputs = state.get_inputs()
 
   if inputs.search == "" then
@@ -132,10 +133,18 @@ function M.apply_all_replacements()
     return
   end
 
+  -- Count unique files
+  local files = {}
+  for _, result in ipairs(results) do
+    files[result.filename] = true
+  end
+  local file_count = vim.tbl_count(files)
+
   -- Confirm before applying
   local response = vim.fn.input(string.format(
-    "Apply %d replacements? (y/n): ",
-    #results
+    "Apply %d replacements in %d files? (y/n): ",
+    #results,
+    file_count
   ))
 
   if response:lower() ~= 'y' then
@@ -143,21 +152,40 @@ function M.apply_all_replacements()
     return
   end
 
-  vim.notify("Apply all replacements - Not yet fully implemented", vim.log.levels.INFO)
-  -- TODO: Implement full replacement logic using search module
+  -- Perform replacements
+  local count = search.replace(inputs.search, inputs.replace, results)
+
+  if count > 0 then
+    vim.notify(
+      string.format("Applied %d replacements in %d files", count, file_count),
+      vim.log.levels.INFO
+    )
+
+    -- Refresh search to show updated results
+    vim.schedule(function()
+      require("wherewolf.ui").perform_search()
+    end)
+  else
+    vim.notify("No replacements applied", vim.log.levels.WARN)
+  end
 end
 
 ---Toggle advanced input fields
 function M.toggle_advanced()
   local state = require("wherewolf.ui.state")
+  local sidebar = require("wherewolf.ui.sidebar")
+
   state.current.show_advanced = not state.current.show_advanced
+
+  -- Refresh the sidebar content
+  if state.is_buf_valid() then
+    sidebar.refresh_content(state.current.buf)
+  end
 
   vim.notify(
     "Advanced fields " .. (state.current.show_advanced and "shown" or "hidden"),
     vim.log.levels.INFO
   )
-
-  -- TODO: Actually show/hide the include/exclude fields in UI
 end
 
 return M

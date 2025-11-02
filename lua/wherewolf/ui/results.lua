@@ -2,6 +2,7 @@
 
 local state = require("wherewolf.ui.state")
 local highlights = require("wherewolf.ui.highlights")
+local boundaries = require("wherewolf.ui.boundaries")
 
 local M = {}
 
@@ -30,10 +31,11 @@ end
 
 ---Format a single result line with diff markers
 ---@param result table Search result
+---@param pattern string Search pattern
 ---@param replacement string Replacement text
 ---@return string delete_line Line with - marker
 ---@return string add_line Line with + marker
-local function format_diff_lines(result, replacement)
+local function format_diff_lines(result, pattern, replacement)
   local line_num_str = string.format("%4d", result.lnum)
 
   -- Line to be deleted (red)
@@ -41,12 +43,13 @@ local function format_diff_lines(result, replacement)
 
   -- Line to be added (green)
   local add_line
-  if replacement and replacement ~= "" then
-    -- Replace pattern in text
-    local new_text = result.text:gsub(result.match or "", replacement)
+  if replacement and replacement ~= "" and pattern and pattern ~= "" then
+    -- Replace pattern in text (preview only - actual replacement happens via search.replace)
+    local new_text = result.text:gsub(vim.pesc(pattern), replacement)
     add_line = string.format("    %s: + %s", line_num_str, new_text)
   else
-    add_line = string.format("    %s: + %s", line_num_str, result.text)
+    -- No replacement specified - just show same text with + marker
+    add_line = string.format("    %s:   %s", line_num_str, result.text)
   end
 
   return delete_line, add_line
@@ -61,10 +64,11 @@ function M.display(buf, results)
   end
 
   local inputs = state.get_inputs()
+  local pattern = inputs.search
   local replacement = inputs.replace
 
-  -- Get current buffer content
-  local current_lines = vim.api.nvim_buf_get_lines(buf, 0, state.input_lines.results_start - 1, false)
+  -- Get results start position from extmark
+  local results_start_row = boundaries.get_results_start_row(buf)
 
   -- Start building result lines
   local result_lines = {}
@@ -94,7 +98,7 @@ function M.display(buf, results)
 
       -- Results for this file
       for _, result in ipairs(file_results) do
-        local delete_line, add_line = format_diff_lines(result, replacement)
+        local delete_line, add_line = format_diff_lines(result, pattern, replacement)
         table.insert(result_lines, delete_line)
         table.insert(result_lines, add_line)
       end
@@ -103,15 +107,15 @@ function M.display(buf, results)
     end
   end
 
-  -- Combine with input lines
-  local all_lines = vim.list_extend(current_lines, result_lines)
-
-  -- Update buffer
-  vim.api.nvim_buf_set_option(buf, 'modifiable', true)
-  vim.api.nvim_buf_set_lines(buf, 0, -1, false, all_lines)
+  -- Use safe buffer modification (sets update_disabled flag)
+  boundaries.set_buf_lines_safe(buf, results_start_row, -1, result_lines)
 
   -- Apply syntax highlighting with extmarks
-  M.apply_highlights(buf, state.input_lines.results_start)
+  vim.schedule(function()
+    if vim.api.nvim_buf_is_valid(buf) then
+      M.apply_highlights(buf, results_start_row + 1)
+    end
+  end)
 end
 
 ---Apply syntax highlighting to results
@@ -200,8 +204,8 @@ function M.clear(buf)
     return
   end
 
-  -- Get current input lines
-  local input_lines = vim.api.nvim_buf_get_lines(buf, 0, state.input_lines.results_start - 1, false)
+  -- Get results start position from extmark
+  local results_start_row = boundaries.get_results_start_row(buf)
 
   -- Add empty state message
   local result_lines = {
@@ -210,15 +214,12 @@ function M.clear(buf)
     "",
   }
 
-  local all_lines = vim.list_extend(input_lines, result_lines)
-
-  -- Update buffer
-  vim.api.nvim_buf_set_option(buf, 'modifiable', true)
-  vim.api.nvim_buf_set_lines(buf, 0, -1, false, all_lines)
+  -- Use safe buffer modification
+  boundaries.set_buf_lines_safe(buf, results_start_row, -1, result_lines)
 
   -- Clear highlights
-  local ns = get_ns()
-  vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
+  vim.api.nvim_buf_clear_namespace(buf, boundaries.ns_results, 0, -1)
+  vim.api.nvim_buf_clear_namespace(buf, boundaries.ns_hl, 0, -1)
 end
 
 ---Show loading indicator
@@ -228,7 +229,8 @@ function M.show_loading(buf)
     return
   end
 
-  local input_lines = vim.api.nvim_buf_get_lines(buf, 0, state.input_lines.results_start - 1, false)
+  -- Get results start position from extmark
+  local results_start_row = boundaries.get_results_start_row(buf)
 
   local result_lines = {
     "",
@@ -236,10 +238,8 @@ function M.show_loading(buf)
     "",
   }
 
-  local all_lines = vim.list_extend(input_lines, result_lines)
-
-  vim.api.nvim_buf_set_option(buf, 'modifiable', true)
-  vim.api.nvim_buf_set_lines(buf, 0, -1, false, all_lines)
+  -- Use safe buffer modification
+  boundaries.set_buf_lines_safe(buf, results_start_row, -1, result_lines)
 end
 
 return M

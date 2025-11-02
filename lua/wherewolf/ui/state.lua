@@ -19,6 +19,9 @@ local M = {}
 ---@field is_searching boolean Whether a search is in progress
 ---@field debounce_timer? table Timer for debouncing
 ---@field search_job_id? number Current search job ID
+---@field update_disabled boolean Guard flag to prevent infinite loops during programmatic updates
+---@field last_inputs? WherewolfInputFields Last input values to detect changes
+---@field extmark_ids? table Extmark IDs for boundary tracking
 
 ---@type WherewolfUIState
 M.current = {
@@ -33,10 +36,13 @@ M.current = {
   },
   results = {},
   current_field = 1,
-  show_advanced = false,
+  show_advanced = nil,  -- Will be set from config on first open
   is_searching = false,
   debounce_timer = nil,
   search_job_id = nil,  -- Track current search job to cancel it
+  update_disabled = false,  -- Guard flag for programmatic updates
+  last_inputs = nil,  -- Track last input values
+  extmark_ids = {},  -- Extmark IDs for boundaries
 }
 
 ---Input field line numbers in the buffer
@@ -66,11 +72,13 @@ function M.reset()
     M.current.debounce_timer = nil
   end
 
-  -- Stop any running search job
-  if M.current.search_job_id and M.current.search_job_id > 0 then
-    vim.fn.jobstop(M.current.search_job_id)
-    M.current.search_job_id = nil
+  -- Stop any running search job (handled by search module now)
+  local search_module = require("wherewolf.search")
+  if search_module._current_search_obj then
+    pcall(function() search_module._current_search_obj:kill(15) end)
+    search_module._current_search_obj = nil
   end
+  M.current.search_job_id = nil
 end
 
 ---Check if sidebar is currently open

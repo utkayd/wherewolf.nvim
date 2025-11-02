@@ -27,7 +27,7 @@ M.defaults = {
   case_sensitive = false,
   multiline = false,
   max_results = 1000,
-  debounce_ms = 150,
+  debounce_ms = 500,  -- Wait 500ms after user stops typing
 
   ui = {
     position = "right",       -- "left" or "right"

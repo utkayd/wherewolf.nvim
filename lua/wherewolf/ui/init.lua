@@ -31,7 +31,6 @@ end
 
 ---Perform search with current inputs
 function M.perform_search()
-  print("[wherewolf] perform_search() called")
 
   if not state.is_buf_valid() then
     vim.notify("Wherewolf buffer is not valid", vim.log.levels.ERROR)
@@ -39,16 +38,17 @@ function M.perform_search()
   end
 
   -- CRITICAL: Cancel any running search job first!
-  if state.current.search_job_id and state.current.search_job_id > 0 then
-    print("[wherewolf] Stopping previous search job:", state.current.search_job_id)
-    vim.fn.jobstop(state.current.search_job_id)
+  local search_module = require("wherewolf.search")
+  if search_module._current_search_obj then
+    pcall(function() search_module._current_search_obj:kill(15) end) -- SIGTERM
+    search_module._current_search_obj = nil
     state.current.search_job_id = nil
+    -- Reset the searching flag when we cancel
+    state.current.is_searching = false
   end
 
   local buf = state.current.buf
   local inputs = state.get_inputs()
-
-  print("[wherewolf] perform_search: pattern =", inputs.search)
 
   -- Validate inputs
   if inputs.search == "" then
@@ -68,8 +68,6 @@ function M.perform_search()
     exclude = inputs.exclude ~= "" and inputs.exclude or nil,
     rg_flags = {},
     on_complete = function(search_results)
-      state.current.is_searching = false
-      state.current.search_job_id = nil  -- Clear job_id on completion
 
       -- Store results in state
       state.set_results(search_results)
@@ -77,6 +75,7 @@ function M.perform_search()
       -- Display results
       if vim.api.nvim_buf_is_valid(buf) then
         results.display(buf, search_results)
+      else
       end
 
       -- Notify user
@@ -89,6 +88,10 @@ function M.perform_search()
           vim.log.levels.INFO
         )
       end
+
+      -- IMPORTANT: Reset searching flag LAST, after all UI updates
+      state.current.is_searching = false
+      state.current.search_job_id = nil
     end,
     on_error = function(error_msg)
       state.current.is_searching = false
@@ -106,7 +109,6 @@ function M.perform_search()
   -- Execute search and store job_id so we can cancel it later
   local job_id = search.execute(inputs.search, search_opts)
   state.current.search_job_id = job_id
-  print("[wherewolf] Stored search job_id:", job_id)
 end
 
 ---Count number of unique files in results
@@ -201,14 +203,20 @@ function M.set_search(pattern)
 
   state.update_input("search", pattern)
 
-  -- Update buffer
+  -- Update buffer using safe wrapper
   if state.is_buf_valid() then
     local buf = state.current.buf
     local line_num = state.input_lines.search
     local new_line = "  Pattern: " .. pattern
 
+    state.current.update_disabled = true
+
     vim.api.nvim_buf_set_option(buf, 'modifiable', true)
     vim.api.nvim_buf_set_lines(buf, line_num - 1, line_num, false, { new_line })
+
+    vim.schedule(function()
+      state.current.update_disabled = false
+    end)
 
     -- Trigger search
     vim.schedule(function()
@@ -222,14 +230,20 @@ end
 function M.set_replace(replacement)
   state.update_input("replace", replacement)
 
-  -- Update buffer
+  -- Update buffer using safe wrapper
   if state.is_buf_valid() then
     local buf = state.current.buf
     local line_num = state.input_lines.replace
     local new_line = "  Replace: " .. replacement
 
+    state.current.update_disabled = true
+
     vim.api.nvim_buf_set_option(buf, 'modifiable', true)
     vim.api.nvim_buf_set_lines(buf, line_num - 1, line_num, false, { new_line })
+
+    vim.schedule(function()
+      state.current.update_disabled = false
+    end)
   end
 end
 
