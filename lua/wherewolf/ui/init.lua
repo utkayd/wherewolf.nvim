@@ -203,16 +203,15 @@ function M.set_search(pattern)
 
   state.update_input("search", pattern)
 
-  -- Update buffer using safe wrapper
+  -- Update buffer using safe wrapper (label is virtual text, so we just set the value)
   if state.is_buf_valid() then
     local buf = state.current.buf
     local line_num = state.input_lines.search
-    local new_line = "  Pattern: " .. pattern
 
     state.current.update_disabled = true
 
     vim.api.nvim_buf_set_option(buf, 'modifiable', true)
-    vim.api.nvim_buf_set_lines(buf, line_num - 1, line_num, false, { new_line })
+    vim.api.nvim_buf_set_lines(buf, line_num - 1, line_num, false, { pattern })
 
     vim.schedule(function()
       state.current.update_disabled = false
@@ -230,16 +229,15 @@ end
 function M.set_replace(replacement)
   state.update_input("replace", replacement)
 
-  -- Update buffer using safe wrapper
+  -- Update buffer using safe wrapper (label is virtual text, so we just set the value)
   if state.is_buf_valid() then
     local buf = state.current.buf
     local line_num = state.input_lines.replace
-    local new_line = "  Replace: " .. replacement
 
     state.current.update_disabled = true
 
     vim.api.nvim_buf_set_option(buf, 'modifiable', true)
-    vim.api.nvim_buf_set_lines(buf, line_num - 1, line_num, false, { new_line })
+    vim.api.nvim_buf_set_lines(buf, line_num - 1, line_num, false, { replacement })
 
     vim.schedule(function()
       state.current.update_disabled = false

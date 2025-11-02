@@ -14,18 +14,15 @@ end
 ---Extract input value from buffer line
 ---@param buf number Buffer handle
 ---@param line_num number Line number (0-indexed)
----@param prefix string Prefix to remove (e.g., "  Pattern: ")
 ---@return string value Input value
-local function get_line_value(buf, line_num, prefix)
+local function get_line_value(buf, line_num)
   local lines = vim.api.nvim_buf_get_lines(buf, line_num, line_num + 1, false)
   if #lines == 0 then
     return ""
   end
 
-  local line = lines[1]
-  -- Remove prefix
-  local value = line:sub(#prefix + 1)
-  return value
+  -- Since labels are now virtual text, the buffer contains only the value
+  return lines[1]
 end
 
 ---Update input value in state from buffer
@@ -37,20 +34,8 @@ local function sync_input_from_buffer(buf, field_name)
     return
   end
 
-  local prefixes = {
-    search = "  Pattern: ",
-    replace = "  Replace: ",
-    include = "  Files:   ",
-    exclude = "  Exclude: ",
-  }
-
-  local prefix = prefixes[field_name]
-  if not prefix then
-    return
-  end
-
   -- Get value from buffer (0-indexed)
-  local value = get_line_value(buf, line_num - 1, prefix)
+  local value = get_line_value(buf, line_num - 1)
 
   state.update_input(field_name, value)
 end
@@ -118,6 +103,253 @@ end
 ---@param buf number Buffer handle
 local function setup_autocmds(buf)
   local augroup = vim.api.nvim_create_augroup('WherewolfInput', { clear = true })
+
+  -- Protect input lines from being deleted
+  vim.api.nvim_buf_attach(buf, false, {
+    on_lines = function(_, buf, _, first_line, _, last_line)
+      -- Skip if this is a programmatic update
+      if state.current.update_disabled then
+        return
+      end
+
+      -- Check if any input lines were deleted
+      vim.schedule(function()
+        if not vim.api.nvim_buf_is_valid(buf) then
+          return
+        end
+
+        -- Get all input line numbers (0-indexed for comparison)
+        local input_line_nums = {
+          state.input_lines.search and (state.input_lines.search - 1),
+          state.input_lines.replace and (state.input_lines.replace - 1),
+          state.input_lines.include and (state.input_lines.include - 1),
+          state.input_lines.exclude and (state.input_lines.exclude - 1),
+        }
+
+        -- Check if any input line is missing or was deleted
+        local total_lines = vim.api.nvim_buf_line_count(buf)
+        local needs_restore = false
+
+        for _, line_num in ipairs(input_line_nums) do
+          if line_num and line_num < total_lines then
+            local lines = vim.api.nvim_buf_get_lines(buf, line_num, line_num + 1, false)
+            -- If the line doesn't exist, mark for restore
+            if #lines == 0 or lines[1] == nil then
+              needs_restore = true
+              break
+            end
+          elseif line_num and line_num >= total_lines then
+            -- Line number is beyond buffer, needs restore
+            needs_restore = true
+            break
+          end
+        end
+
+        if needs_restore then
+          -- Restore entire buffer structure
+          local boundaries = require("wherewolf.ui.boundaries")
+          state.current.update_disabled = true
+
+          -- Get current input values before restoration
+          local current_search = state.current.inputs.search or ""
+          local current_replace = state.current.inputs.replace or ""
+          local current_include = state.current.inputs.include or ""
+          local current_exclude = state.current.inputs.exclude or ""
+
+          -- Rebuild input area
+          local lines = {
+            "╔══════════════════════════════════════════════════╗",
+            current_search,
+            current_replace,
+          }
+
+          if state.current.show_advanced then
+            table.insert(lines, current_include)
+            table.insert(lines, current_exclude)
+          end
+
+          table.insert(lines, "╠══════════════════════════════════════════════════╣")
+
+          -- Get existing results
+          local results_start = boundaries.get_results_start_row(buf)
+          local existing_results = vim.api.nvim_buf_get_lines(buf, results_start, -1, false)
+
+          -- Append existing results
+          vim.list_extend(lines, existing_results)
+
+          -- Restore buffer
+          vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+
+          -- Re-setup extmark boundaries after restoration
+          vim.schedule(function()
+            if vim.api.nvim_buf_is_valid(buf) then
+              state.current.extmark_ids = boundaries.setup_boundaries(buf)
+            end
+            state.current.update_disabled = false
+          end)
+        end
+      end)
+    end,
+  })
+
+  -- Prevent backspace from deleting input lines in insert mode
+  vim.api.nvim_buf_set_keymap(buf, 'i', '<BS>', '', {
+    noremap = true,
+    silent = true,
+    callback = function()
+      local cursor = vim.api.nvim_win_get_cursor(0)
+      local line_num = cursor[1]
+      local col = cursor[2]
+
+      -- Check if we're in an input field
+      local field_num = state.get_field_from_line(line_num)
+      if field_num then
+        -- If at column 0, don't allow backspace (would merge with previous line)
+        if col == 0 then
+          return
+        end
+        -- Otherwise, normal backspace
+        local keys = vim.api.nvim_replace_termcodes('<BS>', true, false, true)
+        vim.api.nvim_feedkeys(keys, 'n', false)
+      end
+    end,
+    desc = 'Wherewolf: Protected backspace',
+  })
+
+  -- Prevent normal mode deletions of input lines
+  vim.api.nvim_buf_set_keymap(buf, 'n', 'dd', '', {
+    noremap = true,
+    silent = true,
+    callback = function()
+      local cursor = vim.api.nvim_win_get_cursor(0)
+      local line_num = cursor[1]
+
+      -- Check if we're on an input field or header/separator
+      local field_num = state.get_field_from_line(line_num)
+      if field_num or line_num == 1 or line_num == (state.input_lines.results_start - 1) then
+        -- In input area, just clear the line content instead of deleting
+        if field_num then
+          vim.api.nvim_buf_set_lines(buf, line_num - 1, line_num, false, {""})
+        end
+        return
+      end
+
+      -- In results area, allow normal deletion
+      local keys = vim.api.nvim_replace_termcodes('dd', true, false, true)
+      vim.api.nvim_feedkeys(keys, 'n', false)
+    end,
+    desc = 'Wherewolf: Protected line deletion',
+  })
+
+  -- Prevent D (delete to end of line) on protected lines
+  vim.api.nvim_buf_set_keymap(buf, 'n', 'D', '', {
+    noremap = true,
+    silent = true,
+    callback = function()
+      local cursor = vim.api.nvim_win_get_cursor(0)
+      local line_num = cursor[1]
+      local field_num = state.get_field_from_line(line_num)
+
+      if field_num then
+        -- In input field, allow D but prevent deletion if at column 0
+        local keys = vim.api.nvim_replace_termcodes('D', true, false, true)
+        vim.api.nvim_feedkeys(keys, 'n', false)
+      elseif line_num == 1 or line_num == (state.input_lines.results_start - 1) then
+        -- On header/separator, don't allow D
+        return
+      else
+        -- In results area, allow normal D
+        local keys = vim.api.nvim_replace_termcodes('D', true, false, true)
+        vim.api.nvim_feedkeys(keys, 'n', false)
+      end
+    end,
+    desc = 'Wherewolf: Protected D command',
+  })
+
+  -- Prevent C (change line) from deleting input lines
+  vim.api.nvim_buf_set_keymap(buf, 'n', 'cc', '', {
+    noremap = true,
+    silent = true,
+    callback = function()
+      local cursor = vim.api.nvim_win_get_cursor(0)
+      local line_num = cursor[1]
+      local field_num = state.get_field_from_line(line_num)
+
+      if field_num then
+        -- In input field, clear and enter insert mode
+        vim.api.nvim_buf_set_lines(buf, line_num - 1, line_num, false, {""})
+        vim.cmd('startinsert')
+      elseif line_num == 1 or line_num == (state.input_lines.results_start - 1) then
+        -- On header/separator, don't allow cc
+        return
+      else
+        -- In results area, allow normal cc
+        local keys = vim.api.nvim_replace_termcodes('cc', true, false, true)
+        vim.api.nvim_feedkeys(keys, 'n', false)
+      end
+    end,
+    desc = 'Wherewolf: Protected change line',
+  })
+
+  -- Prevent visual mode deletion of input lines
+  vim.api.nvim_buf_set_keymap(buf, 'v', 'd', '', {
+    noremap = true,
+    silent = true,
+    callback = function()
+      local start_pos = vim.fn.getpos("'<")
+      local end_pos = vim.fn.getpos("'>")
+      local start_line = start_pos[2]
+      local end_line = end_pos[2]
+
+      -- Check if selection includes any protected lines
+      local last_input_line = state.input_lines.exclude or state.input_lines.replace
+      local separator_line = state.input_lines.results_start - 1
+
+      for line = start_line, end_line do
+        if line == 1 or line == separator_line or (line >= state.input_lines.search and line <= last_input_line) then
+          -- Selection includes protected area, don't allow deletion
+          vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<Esc>', true, false, true), 'n', false)
+          vim.notify('Cannot delete input fields or headers', vim.log.levels.WARN)
+          return
+        end
+      end
+
+      -- Safe to delete in results area
+      local keys = vim.api.nvim_replace_termcodes('d', true, false, true)
+      vim.api.nvim_feedkeys(keys, 'x', false)
+    end,
+    desc = 'Wherewolf: Protected visual deletion',
+  })
+
+  -- Also protect visual mode 'c' (change)
+  vim.api.nvim_buf_set_keymap(buf, 'v', 'c', '', {
+    noremap = true,
+    silent = true,
+    callback = function()
+      local start_pos = vim.fn.getpos("'<")
+      local end_pos = vim.fn.getpos("'>")
+      local start_line = start_pos[2]
+      local end_line = end_pos[2]
+
+      -- Check if selection includes any protected lines
+      local last_input_line = state.input_lines.exclude or state.input_lines.replace
+      local separator_line = state.input_lines.results_start - 1
+
+      for line = start_line, end_line do
+        if line == 1 or line == separator_line or (line >= state.input_lines.search and line <= last_input_line) then
+          -- Selection includes protected area, don't allow change
+          vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<Esc>', true, false, true), 'n', false)
+          vim.notify('Cannot modify input field structure', vim.log.levels.WARN)
+          return
+        end
+      end
+
+      -- Safe to change in results area
+      local keys = vim.api.nvim_replace_termcodes('c', true, false, true)
+      vim.api.nvim_feedkeys(keys, 'x', false)
+    end,
+    desc = 'Wherewolf: Protected visual change',
+  })
 
   -- Track text changes in buffer
   vim.api.nvim_create_autocmd({ 'TextChanged', 'TextChangedI' }, {
@@ -196,9 +428,9 @@ function M.next_field(buf)
   -- Move cursor to field line
   local line_num = state.get_line_for_field(next_field)
   if line_num then
-    -- Position cursor at end of line
+    -- Position cursor at end of actual value (label is virtual text)
     local lines = vim.api.nvim_buf_get_lines(buf, line_num - 1, line_num, false)
-    local line_length = #lines[1]
+    local line_length = #(lines[1] or "")
     vim.api.nvim_win_set_cursor(0, { line_num, line_length })
   end
 end
@@ -224,9 +456,9 @@ function M.prev_field(buf)
   -- Move cursor to field line
   local line_num = state.get_line_for_field(prev_field)
   if line_num then
-    -- Position cursor at end of line
+    -- Position cursor at end of actual value (label is virtual text)
     local lines = vim.api.nvim_buf_get_lines(buf, line_num - 1, line_num, false)
-    local line_length = #lines[1]
+    local line_length = #(lines[1] or "")
     vim.api.nvim_win_set_cursor(0, { line_num, line_length })
   end
 end
@@ -241,7 +473,8 @@ function M.setup(buf)
   vim.schedule(function()
     if vim.api.nvim_buf_is_valid(buf) then
       local line_num = state.input_lines.search
-      vim.api.nvim_win_set_cursor(0, { line_num, 11 }) -- After "  Pattern: "
+      -- Cursor at start of line (label is virtual text, not real content)
+      vim.api.nvim_win_set_cursor(0, { line_num, 0 })
       vim.cmd('startinsert!')
     end
   end)
@@ -261,17 +494,17 @@ function M.clear_all(buf)
   }
   state.current.last_inputs = vim.deepcopy(state.current.inputs)
 
-  -- Update buffer using safe wrapper
+  -- Update buffer using safe wrapper (labels are virtual text, so we just clear the values)
   state.current.update_disabled = true
 
   local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
-  lines[state.input_lines.search] = "  Pattern: "
-  lines[state.input_lines.replace] = "  Replace: "
+  lines[state.input_lines.search] = ""
+  lines[state.input_lines.replace] = ""
   if state.input_lines.include then
-    lines[state.input_lines.include] = "  Files:   "
+    lines[state.input_lines.include] = ""
   end
   if state.input_lines.exclude then
-    lines[state.input_lines.exclude] = "  Exclude: "
+    lines[state.input_lines.exclude] = ""
   end
 
   vim.api.nvim_buf_set_option(buf, 'modifiable', true)
@@ -281,8 +514,8 @@ function M.clear_all(buf)
     state.current.update_disabled = false
   end)
 
-  -- Move cursor to search field
-  vim.api.nvim_win_set_cursor(0, { state.input_lines.search, 11 })
+  -- Move cursor to search field (start of line, since label is virtual text)
+  vim.api.nvim_win_set_cursor(0, { state.input_lines.search, 0 })
 end
 
 return M

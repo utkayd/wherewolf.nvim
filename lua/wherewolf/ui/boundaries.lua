@@ -16,36 +16,58 @@ M.ns_hl = vim.api.nvim_create_namespace('wherewolf-highlight')  -- Syntax highli
 function M.setup_boundaries(buf)
   local extmarks = {}
   local show_advanced = state.current.show_advanced
+  local highlights_mod = require("wherewolf.ui.highlights")
 
   -- Search input boundary (line 1, after header)
+  -- Use virt_text to display the label (not part of actual buffer content)
   extmarks.search = vim.api.nvim_buf_set_extmark(buf, M.ns_main, 1, 0, {
-    right_gravity = false,  -- Don't move when text inserted at position
+    id = extmarks.search,  -- Reuse ID if it exists
+    right_gravity = false,
+    virt_text = {{ "  Pattern: ", "WherewolfInputLabel" }},
+    virt_text_pos = "inline",
+    invalidate = false,  -- Don't invalidate on buffer changes
   })
 
   -- Replace input boundary
   extmarks.replace = vim.api.nvim_buf_set_extmark(buf, M.ns_main, 2, 0, {
+    id = extmarks.replace,
     right_gravity = false,
+    virt_text = {{ "  Replace: ", "WherewolfInputLabel" }},
+    virt_text_pos = "inline",
+    invalidate = false,
   })
 
   if show_advanced then
     -- Include input boundary
     extmarks.include = vim.api.nvim_buf_set_extmark(buf, M.ns_main, 3, 0, {
+      id = extmarks.include,
       right_gravity = false,
+      virt_text = {{ "  Files:   ", "WherewolfInputLabel" }},
+      virt_text_pos = "inline",
+      invalidate = false,
     })
 
     -- Exclude input boundary
     extmarks.exclude = vim.api.nvim_buf_set_extmark(buf, M.ns_main, 4, 0, {
+      id = extmarks.exclude,
       right_gravity = false,
+      virt_text = {{ "  Exclude: ", "WherewolfInputLabel" }},
+      virt_text_pos = "inline",
+      invalidate = false,
     })
 
     -- Results header (after exclude)
     extmarks.results_header = vim.api.nvim_buf_set_extmark(buf, M.ns_main, 5, 0, {
+      id = extmarks.results_header,
       right_gravity = false,
+      invalidate = false,
     })
   else
     -- Results header (after replace, no advanced fields)
     extmarks.results_header = vim.api.nvim_buf_set_extmark(buf, M.ns_main, 3, 0, {
+      id = extmarks.results_header,
       right_gravity = false,
+      invalidate = false,
     })
   end
 
@@ -95,16 +117,9 @@ function M.get_input_value(buf, field_name)
   -- Get lines between boundaries
   local lines = vim.api.nvim_buf_get_lines(buf, start_row, end_row, false)
 
-  -- Extract value (remove prefix like "  Pattern: ")
+  -- Since labels are now virtual text, the actual buffer content is just the value
   if #lines > 0 then
-    local prefixes = {
-      search = "  Pattern: ",
-      replace = "  Replace: ",
-      include = "  Files:   ",
-      exclude = "  Exclude: ",
-    }
-    local prefix = prefixes[field_name] or ""
-    return lines[1]:sub(#prefix + 1)
+    return lines[1]
   end
 
   return ""

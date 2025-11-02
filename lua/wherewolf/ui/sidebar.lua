@@ -27,10 +27,11 @@ local function init_buffer_content(buf)
   local show_advanced = state.current.show_advanced
   local inputs = state.get_inputs()
 
+  -- Buffer lines now contain ONLY the input values (labels are virtual text)
   local lines = {
     "╔══════════════════════════════════════════════════╗",
-    "  Pattern: " .. inputs.search,
-    "  Replace: " .. inputs.replace,
+    inputs.search,    -- Line 1: search value only
+    inputs.replace,   -- Line 2: replace value only
   }
 
   -- Update input line numbers (for backwards compatibility)
@@ -38,8 +39,8 @@ local function init_buffer_content(buf)
   state.input_lines.replace = 3
 
   if show_advanced then
-    table.insert(lines, "  Files:   " .. inputs.include)
-    table.insert(lines, "  Exclude: " .. inputs.exclude)
+    table.insert(lines, inputs.include)   -- Line 3: include value only
+    table.insert(lines, inputs.exclude)   -- Line 4: exclude value only
     state.input_lines.include = 4
     state.input_lines.exclude = 5
     state.input_lines.results_start = 7
@@ -59,6 +60,7 @@ local function init_buffer_content(buf)
   boundaries.set_buf_lines_safe(buf, 0, -1, lines)
 
   -- Setup extmark boundaries AFTER buffer has content
+  -- The extmarks will add virtual text labels that appear before the values
   vim.schedule(function()
     if vim.api.nvim_buf_is_valid(buf) then
       state.current.extmark_ids = boundaries.setup_boundaries(buf)
